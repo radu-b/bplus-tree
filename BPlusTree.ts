@@ -1,16 +1,27 @@
-namespace BPlusTree {
+namespace BPlus {
 
-    interface Node {
+    interface Node<V> {
         isLeaf?: boolean;
-        parent?: Node;
-        children: { key: number, value?: number, node?: Node }[];
+        parent?: Node<V>;
+        children: NodeChild<V>[];
     }
 
-    export class BPTree {
-        branching: number;
-        root: Node;
+    interface NodeChild<V> {
+        key: number;
+        value?: V;
+        node?: Node<V>;
+    }
 
-        public find(key: number): number {
+    export class BPlusTree<V> {
+        branching: number;
+        root: Node<V>;
+
+        public constructor(branching: number) {
+            this.branching = branching;
+            this.root = { isLeaf: true, children: [] };
+        }
+
+        public find(key: number): V {
             let leaf = this.findLeaf(key, this.root);
             let keyIndex = this.getKeyIndex(key, leaf);
             if (keyIndex.found) {
@@ -20,7 +31,7 @@ namespace BPlusTree {
             return null;
         }
 
-        public insert(key: number, value: number) {
+        public insert(key: number, value: V) {
             let leaf = this.findLeaf(key, this.root);
             let keyIndex = this.getKeyIndex(key, leaf);
             if (keyIndex.found) {
@@ -34,21 +45,27 @@ namespace BPlusTree {
             }
         }
 
-        private split(node: Node) {
-            let halfIndex = Math.floor(node.children.length / 2);
+        private split(node: Node<V>) {
+            let halfIndex = Math.floor((node.children.length - (node.isLeaf ? 0 : 1)) / 2);
 
             let extraKey = node.children[halfIndex].key;
             let extraChildren = node.children.splice(halfIndex, node.children.length - halfIndex);
-            if (!node.isLeaf) {
-                extraChildren.splice(0, 1);
-            }
+            let extraNode: Node<V> = { isLeaf: node.isLeaf, parent: node.parent, children: extraChildren };
 
-            let extraNode: Node = { isLeaf: node.isLeaf, parent: node.parent, children: extraChildren };
+            if (!node.isLeaf) {
+                let middleNode = extraChildren.splice(0, 1)[0].node;
+                node.children.push({ key: Infinity, node: middleNode });
+
+                for (let child of extraChildren) {
+                    child.node.parent = extraNode;
+                }
+            }
 
             let parent = node.parent;
             if (parent) {
                 let keyIndex = this.getKeyIndex(extraKey, parent).index;
-                parent.children.splice(keyIndex, 0, { key: extraKey, node: extraNode });
+                parent.children.splice(keyIndex, 0, { key: extraKey, node: node });
+                parent.children[keyIndex + 1].node = extraNode;
 
                 if (parent.children.length > this.branching) {
                     this.split(parent);
@@ -59,10 +76,13 @@ namespace BPlusTree {
                         { key: extraKey, node: node },
                         { key: Infinity, node: extraNode }]
                 };
+
+                node.parent = this.root;
+                extraNode.parent = this.root;
             }
         }
 
-        private findLeaf(key: number, node: Node): Node {
+        private findLeaf(key: number, node: Node<V>): Node<V> {
             if (node.isLeaf) {
                 return node;
             } else {
@@ -74,17 +94,33 @@ namespace BPlusTree {
             }
         }
 
-        private getKeyIndex(key: number, node: Node): { index: number, found: boolean } {
+        private getKeyIndex(key: number, node: Node<V>): { index: number, found: boolean } {
             for (let i = 0; i < node.children.length; i++) {
                 let child = node.children[i];
-                if (child.key == key) {
+                if (key == child.key) {
                     return { index: i, found: true };
-                } else if (child.key < key) {
+                } else if (key < child.key) {
                     return { index: i, found: false };
                 }
             }
 
             return { index: node.children.length, found: false };
+        }
+
+        public print() {
+            this.printNode({ key: 0, node: this.root }, "", true, false, true);
+        }
+
+        private printNode(nodeItem: NodeChild<V>, prefix: string, last: boolean, isLeaf: boolean, isRoot: boolean) {
+            if (!isRoot) {
+                console.log(prefix + (last ? "└── " : "├── ") + nodeItem.key + (isLeaf ? " " + nodeItem.value : ""));
+            }
+            if (!isLeaf) {
+                let node = nodeItem.node;
+                for (let i = 0; i < node.children.length; i++) {
+                    this.printNode(node.children[i], prefix + (last ? "    " : "│   "), i == node.children.length - 1, node.isLeaf, false);
+                }
+            }
         }
     }
 
