@@ -46,26 +46,29 @@ namespace BPlus {
         }
 
         private split(node: Node<V>) {
-            let halfIndex = Math.floor((node.children.length - (node.isLeaf ? 0 : 1)) / 2);
-
-            let extraKey = node.children[halfIndex].key;
-            let extraChildren = node.children.splice(halfIndex, node.children.length - halfIndex);
-            let extraNode: Node<V> = { isLeaf: node.isLeaf, parent: node.parent, children: extraChildren };
+            let middleIndex = Math.floor((node.children.length - (node.isLeaf ? 0 : 1)) / 2);
+            let middleKey = node.children[middleIndex].key;
+            
+            let newNode: Node<V> = {
+                isLeaf: node.isLeaf,
+                parent: node.parent,
+                children: node.children.splice(middleIndex, node.children.length - middleIndex)
+            };
 
             if (!node.isLeaf) {
-                let middleNode = extraChildren.splice(0, 1)[0].node;
+                let middleNode = newNode.children.splice(0, 1)[0].node;
                 node.children.push({ key: Infinity, node: middleNode });
 
-                for (let child of extraChildren) {
-                    child.node.parent = extraNode;
+                for (let child of newNode.children) {
+                    child.node.parent = newNode;
                 }
             }
 
             let parent = node.parent;
             if (parent) {
-                let keyIndex = this.getKeyIndex(extraKey, parent).index;
-                parent.children.splice(keyIndex, 0, { key: extraKey, node: node });
-                parent.children[keyIndex + 1].node = extraNode;
+                let keyIndex = this.getKeyIndex(middleKey, parent).index;
+                parent.children.splice(keyIndex, 0, { key: middleKey, node: node });
+                parent.children[keyIndex + 1].node = newNode;
 
                 if (parent.children.length > this.branching) {
                     this.split(parent);
@@ -73,12 +76,12 @@ namespace BPlus {
             } else {
                 this.root = {
                     children: [
-                        { key: extraKey, node: node },
-                        { key: Infinity, node: extraNode }]
+                        { key: middleKey, node: node },
+                        { key: Infinity, node: newNode }]
                 };
 
                 node.parent = this.root;
-                extraNode.parent = this.root;
+                newNode.parent = this.root;
             }
         }
 
@@ -111,14 +114,16 @@ namespace BPlus {
             this.printNode({ key: 0, node: this.root }, "", true, false, true);
         }
 
-        private printNode(nodeItem: NodeChild<V>, prefix: string, last: boolean, isLeaf: boolean, isRoot: boolean) {
+        private printNode(nodeItem: NodeChild<V>, prefix: string, isLast: boolean, isLeaf: boolean, isRoot: boolean) {
             if (!isRoot) {
-                console.log(prefix + (last ? "└── " : "├── ") + nodeItem.key + (isLeaf ? " " + nodeItem.value : ""));
+                let valueString = isLeaf ? ` [${nodeItem.value}]` : "";
+                console.log(prefix + (isLast ? "└── " : "├── ") + nodeItem.key + valueString);
             }
             if (!isLeaf) {
                 let node = nodeItem.node;
                 for (let i = 0; i < node.children.length; i++) {
-                    this.printNode(node.children[i], prefix + (last ? "    " : "│   "), i == node.children.length - 1, node.isLeaf, false);
+                    let isLastChild = (i == node.children.length - 1);
+                    this.printNode(node.children[i], prefix + (isLast ? "    " : "│   "), isLastChild, node.isLeaf, false);
                 }
             }
         }
