@@ -1,63 +1,71 @@
 namespace BPlus {
 
-    interface Node<V> {
+    interface Node<K, V> {
         isLeaf?: boolean;
-        parent?: Node<V>;
-        children: NodeChild<V>[];
+        parent?: Node<K, V>;
+        children: Child<K, V>[];
     }
 
-    interface NodeChild<V> {
-        key: number;
+    interface Child<K, V> {
+        key: K;
         value?: V;
-        node?: Node<V>;
+        node?: Node<K, V>;
     }
 
-    export class BPlusTree<V> {
+    export class BPlusTree<K, V> {
+        root: Node<K, V>;
         branching: number;
-        root: Node<V>;
+        comparator: (a: K, b: K) => number;
 
-        public constructor(branching: number) {
+        public constructor(branching: number, comparator?: (a: K, b: K) => number) {
             this.branching = branching;
+            this.comparator = comparator;
             this.root = { isLeaf: true, children: [] };
         }
 
-        public find(key: number): V {
+        public find(key: K): V {
             let leaf = this.findLeaf(key, this.root);
-            let keyIndex = this.getKeyIndex(key, leaf);
-            if (keyIndex.found) {
-                return leaf.children[keyIndex.index].value;
-            }
+            let {index, found} = this.getChildIndex(key, leaf);
 
-            return null;
+            if (found) {
+                return leaf.children[index].value;
+            } else {
+                return null;
+            }
         }
 
-        public insert(key: number, value: V) {
+        public add(key: K, value: V) {
             let leaf = this.findLeaf(key, this.root);
-            let keyIndex = this.getKeyIndex(key, leaf);
-            if (keyIndex.found) {
+            let {index, found} = this.getChildIndex(key, leaf);
+
+            if (found) {
+                // Add on an existing key updates the value
+                leaf.children[index].value = value;
                 return;
             }
 
-            leaf.children.splice(keyIndex.index, 0, { key, value });
+            leaf.children.splice(index, 0, { key, value });
 
             if (leaf.children.length > this.branching - 1) {
                 this.split(leaf);
             }
         }
 
-        private split(node: Node<V>) {
-            let middleIndex = Math.floor((node.children.length - (node.isLeaf ? 0 : 1)) / 2);
-            let middleKey = node.children[middleIndex].key;
-            
-            let newNode: Node<V> = {
+        private split(node: Node<K, V>) {
+            let midIndex = Math.floor((node.children.length - (node.isLeaf ? 0 : 1)) / 2);
+            let midKey = node.children[midIndex].key;
+
+            let newNode: Node<K, V> = {
                 isLeaf: node.isLeaf,
                 parent: node.parent,
-                children: node.children.splice(middleIndex, node.children.length - middleIndex)
+                children: node.children.slice(midIndex)
             };
 
+            node.children = node.children.slice(0, midIndex);
+
             if (!node.isLeaf) {
-                let middleNode = newNode.children.splice(0, 1)[0].node;
-                node.children.push({ key: Infinity, node: middleNode });
+                let middleNode = newNode.children.shift().node;
+                node.children.push({ key: null, node: middleNode });
 
                 for (let child of newNode.children) {
                     child.node.parent = newNode;
@@ -66,9 +74,10 @@ namespace BPlus {
 
             let parent = node.parent;
             if (parent) {
-                let keyIndex = this.getKeyIndex(middleKey, parent).index;
-                parent.children.splice(keyIndex, 0, { key: middleKey, node: node });
-                parent.children[keyIndex + 1].node = newNode;
+                let {index} = this.getChildIndex(midKey, parent);
+
+                parent.children.splice(index, 0, { key: midKey, node: node });
+                parent.children[index + 1].node = newNode;
 
                 if (parent.children.length > this.branching) {
                     this.split(parent);
@@ -76,45 +85,82 @@ namespace BPlus {
             } else {
                 this.root = {
                     children: [
-                        { key: middleKey, node: node },
-                        { key: Infinity, node: newNode }]
+                        { key: midKey, node: node },
+                        { key: null, node: newNode }]
                 };
 
-                node.parent = this.root;
-                newNode.parent = this.root;
+                node.parent = newNode.parent = this.root;
             }
         }
 
-        private findLeaf(key: number, node: Node<V>): Node<V> {
+        private findLeaf(key: K, node: Node<K, V>): Node<K, V> {
             if (node.isLeaf) {
                 return node;
             } else {
-                for (let child of node.children) {
-                    if (key < child.key) {
-                        return this.findLeaf(key, child.node);
-                    }
-                }
+                let {index, found} = this.getChildIndex(key, node);
+
+                let child = node.children[index + (found ? 1 : 0)];
+                return this.findLeaf(key, child.node);
             }
         }
 
-        private getKeyIndex(key: number, node: Node<V>): { index: number, found: boolean } {
-            for (let i = 0; i < node.children.length; i++) {
-                let child = node.children[i];
-                if (key == child.key) {
-                    return { index: i, found: true };
-                } else if (key < child.key) {
-                    return { index: i, found: false };
-                }
+        // Returns the index of the child key that is greater than or equal to the given key
+        private getChildIndex(key: K, node: Node<K, V>): { index: number, found: boolean } {
+            if (node.children.length == 0) {
+                return { index: 0, found: false };
             }
 
-            return { index: node.children.length, found: false };
+            let end = node.children.length - 1;
+            if (!node.isLeaf) {
+                end--;
+            }
+
+            let index = this.getChildIndexBinary(key, node.children, 0, end);
+            let comparison = this.compareKey(key, node.children[index].key);
+            if (comparison == 0) {
+                return { index: index, found: true };
+            } else if (comparison < 0) {
+                return { index: index, found: false };
+            } else {
+                return { index: index + 1, found: false };
+            }
+        }
+
+        private getChildIndexBinary(key: K, children: Child<K, V>[], start: number, end: number): number {
+            if (start == end) {
+                return start;
+            }
+
+            let mid = Math.floor((start + end) / 2);
+            let comparison = this.compareKey(key, children[mid].key);
+            if (comparison == 0) {
+                return mid;
+            } else if (comparison < 0) {
+                return this.getChildIndexBinary(key, children, start, Math.max(start, mid - 1));
+            } else {
+                return this.getChildIndexBinary(key, children, Math.min(end, mid + 1), end);
+            }
+        }
+
+        private compareKey(a: K, b: K): number {
+            if (this.comparator) {
+                return this.comparator(a, b);
+            } else {
+                if (a < b) {
+                    return -1;
+                } else if (a > b) {
+                    return 1;
+                } else {
+                    return 0;
+                }
+            }
         }
 
         public print() {
-            this.printNode({ key: 0, node: this.root }, "", true, false, true);
+            this.printNode({ key: null, node: this.root }, "", true, false, true);
         }
 
-        private printNode(nodeItem: NodeChild<V>, prefix: string, isLast: boolean, isLeaf: boolean, isRoot: boolean) {
+        private printNode(nodeItem: Child<K, V>, prefix: string, isLast: boolean, isLeaf: boolean, isRoot: boolean) {
             if (!isRoot) {
                 let valueString = isLeaf ? ` [${nodeItem.value}]` : "";
                 console.log(prefix + (isLast ? "└── " : "├── ") + nodeItem.key + valueString);
